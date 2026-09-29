@@ -1,0 +1,19 @@
+# Vivado generated directories
+*.cache/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+*.gen/
+*.srcs/utils_1/
+
+# Vivado project log files and backups
+*.jou
+*.log
+*.str
+*.xpr.old
+.Xil/
+
+# OS junk
+Thumbs.db
+Desktop.ini
