@@ -1,8 +1,12 @@
 `timescale 1ns / 1ps
 
-module sign_ext(ir, sext_out);
+module sign_ext(ir, from_bus, isSigned, data_size, sext_out);
 
 input [31:0] ir;
+input from_bus; //if 1, take bus
+input  [1:0]  data_size;
+input isSigned; //0 means signed, 1 means unsigned kinda weird
+
 output reg [31:0] sext_out;
 
 // Extract opcode and funct3 for internal self-decoding
@@ -35,8 +39,29 @@ always @(*) begin
     endcase
 end
 
+reg msb;
 // Immediate generation logic
 always @(*) begin
+if (from_bus == 1'b1) begin
+    case (data_size)
+        2'b00: begin // Byte (LB vs LBU)
+            sext_out = (~isSigned) ? {{24{ir[7]}}, ir[7:0]} : {24'b0, ir[7:0]};
+        end
+        
+        2'b01: begin // Halfword (LH vs LHU)
+            sext_out = (~isSigned) ? {{16{ir[15]}}, ir[15:0]} : {16'b0, ir[15:0]};
+        end
+        
+        2'b10, 2'b11: begin // Word (LW - handles both 10 and 11)
+            sext_out = ir;
+        end
+        
+        default: begin
+            sext_out = ir;
+        end
+    endcase
+end
+else begin
     case(imm_type_ctr)
         // I-Type: 12-bit immediate (ir[31:20])
         IMM_I: begin
@@ -62,6 +87,7 @@ always @(*) begin
             sext_out = 32'h0000_0000;
         end
     endcase
+    end
 end
 
 endmodule

@@ -7,6 +7,9 @@ input clk, rst;
 //registers
 reg [31:0] pc, ir, old_pc, mar, mdr;
 wire n, z, c, v; // Fixed: changed from reg to wire (driven by ALU output ports)
+reg [1:0] alu_op;
+wire [2:0] funct3    = ir[14:12];
+
 
 //state machine
 reg [6:0] state, nstate;
@@ -19,15 +22,19 @@ parameter [5:0]
         decode = 6'd3,
         a_exec = 6'd4,
         b_exec = 6'd5,
-        c_exec = 6'd6,
-        d_exec = 6'd7,
-        e_exec = 6'd8;
+        b_mem = 6'd6,
+        b_wb = 6'd7,
+        c_exec = 6'd8,
+        d_exec = 6'd9,
+        e_exec = 6'd10;
     
 //control signals
 //muxes
 reg choose_sr2, mdr_sel;
 reg [1:0] addr_mux_crtl; // add sext/oldpc/0 for LUI
 reg [1:0] pc_mux_ctrl;
+reg ir_or_bus; //for sign extend unit input
+reg sext_or_bus; //input to reg file either sext_out or bus 
 //bus gates
 reg GateALU, GateMDR, GatePc, GateAddr;
 //load controls
@@ -41,9 +48,11 @@ wire [31:0] alu_in_a, alu_in_b, sr1_out, sr2_out, alu_out; // Fixed: added sr2_o
 wire [31:0] sext_out;
 wire [31:0] pc_in, alu_inv, addr_out;
 wire [31:0] mdr_in, mem_out;
+wire [31:0] sext_in, reg_file_in;
 
 // Extract opcode from instruction register
 wire [6:0] opcode = ir[6:0];
+wire [1:0] mar_shf_amt = ir[13:12]; //2'b00 = byte, 2'b01 = halfword 2'b11 = word
 
 // Track Routing Conditions
 wire is_track_a = (opcode == 7'b0110011) || (opcode == 7'b0010011); // R-type or I-type Arith
@@ -56,9 +65,9 @@ wire is_track_e = (opcode == 7'b0110111) ||                         // lui
                   (opcode == 7'b1100111);                           // jalr
 
 //initalize modules (reg file, memory, sign_ext, alu)
-sign_ext sign_ext_multi(.ir(ir), .sext_out(sext_out));
-alu alu_multi(.in_a(alu_in_a), .in_b(alu_in_b), .ir(ir), .alu_out(alu_out), .N(n), .Z(z), .C(c), .V(v));
-reg_file rf_multi(.clk(clk), .rst(rst), .ld_reg(ld_reg), .sr1(ir[19:15]), .sr2(ir[24:20]), .bus_in(bus), .dr(ir[11:7]), .sr1_out(alu_in_a), .sr2_out(sr2_out));
+sign_ext sign_ext_multi(.ir(sext_in), .from_bus(ir_or_bus), .isSigned(ir[14]), .data_size(funct3[1:0]), .sext_out(sext_out));
+alu alu_multi(.in_a(alu_in_a), .in_b(alu_in_b), .ir(ir), .alu_op(alu_op), .alu_out(alu_out), .N(n), .Z(z), .C(c), .V(v));
+reg_file rf_multi(.clk(clk), .rst(rst), .ld_reg(ld_reg), .sr1(ir[19:15]), .sr2(ir[24:20]), .bus_in(reg_file_in), .dr(ir[11:7]), .sr1_out(alu_in_a), .sr2_out(sr2_out));
 memory #(
         .ADDR_WIDTH(12) 
     ) mem_multi (
@@ -72,6 +81,8 @@ memory #(
     );
 
 //combinational logic
+assign reg_file_in = sext_or_bus ? sext_out : bus;
+assign sext_in = ir_or_bus ? bus : ir;
 assign alu_in_b = choose_sr2 ? sext_out : sr2_out;
 assign pc_in = (pc_mux_ctrl == 2'b00) ? bus :
                (pc_mux_ctrl == 2'b01) ? alu_inv : 
@@ -93,6 +104,7 @@ always @(*) begin
     pc_mux_ctrl = 2'b00; mdr_sel = 1'b0;
     mem_size_sel = 2'b00; mem_signed = 1'b0; mem_cs= 1'b0; mem_we = 1'b0;
     choose_sr2 = (opcode == 7'b0010011) ? 1'b1 : 1'b0;
+    ir_or_bus = 1'b0; sext_or_bus = 1'b0;
     
     case (state)
         fetch_1: begin
@@ -128,7 +140,23 @@ always @(*) begin
             nstate = fetch_1;
         end
         b_exec: begin
-            
+            GateALU = 1'b1;
+            choose_sr2 = 1'b1;
+            ld_mar = 1'b1;
+            nstate = b_mem;
+        end
+        b_mem: begin
+            mem_cs = 1'b1;
+            mem_size_sel = funct3[1:0];
+            ld_mdr = 1'b1;  
+            nstate = b_wb;
+        end
+        b_wb: begin 
+           ir_or_bus = 1'b1;
+           GateMDR = 1'b1;
+           sext_or_bus = 1'b1;
+           ld_reg = 1'b1;
+           nstate = fetch_1;
         end
         c_exec: begin
             
@@ -146,6 +174,7 @@ end
 always @(posedge clk or posedge rst)begin
     state <= nstate;
     if (rst) begin
+        state <= fetch_1;
         pc  <= 32'h00000000;
         ir  <= 32'h00000000;
         mar <= 32'h00000000;
@@ -157,6 +186,31 @@ always @(posedge clk or posedge rst)begin
         if (ld_mar) mar <= bus;
         if (ld_mdr) mdr <= mdr_in;
         if (ld_old_pc) old_pc <= bus;
+    end
+end
+
+// --- ALU_OP GROUPING ---
+// 2'b00: Adder-based (Add, Sub, SLT, SLTU, ADDI, etc.)
+// 2'b01: Shifters (SLL, SRL, SRA)
+// 2'b10: Logic operations (AND, OR, XOR)
+// 2'b11: Pass A (or default)
+always @(*) begin
+if(state == b_exec) alu_op = 2'b00;
+else begin
+    case (funct3)
+        3'b000, 
+        3'b010, 
+        3'b011: alu_op = 2'b00; // Adder / Comparators
+        
+        3'b001, 
+        3'b101: alu_op = 2'b01; // Shifters
+        
+        3'b100, 
+        3'b110, 
+        3'b111: alu_op = 2'b10; // Logic (AND, OR, XOR)
+        
+        default: alu_op = 2'b00;
+    endcase
     end
 end
 
