@@ -55,8 +55,8 @@ $display("--- Final Register File Dump ---");
 
     // Monitor state changes in the console as it runs
     initial begin
-        $monitor("Time=%0t ns | State=%0d | PC=%h | IR=%h | ALU_Out=%h | Mar=%h | MDR=%h", 
-                 $time, uut.state, uut.pc, uut.ir, uut.alu_out, uut.mar, uut.mdr);
+        $monitor("Time=%0t ns | State=%0d | PC=%h | IR=%h | ALU_Out=%h | Mar=%h | MDR=%h | OldPc = %h ", 
+                 $time, uut.state, uut.pc, uut.ir, uut.alu_out, uut.mar, uut.mdr, uut.old_pc);
     end
 
 endmodule

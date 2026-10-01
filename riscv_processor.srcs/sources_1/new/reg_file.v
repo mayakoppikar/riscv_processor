@@ -1,8 +1,8 @@
 `timescale 1ns / 1ps
 
-module reg_file(clk, rst, ld_reg, sr1, sr2, bus_in, dr, sr1_out, sr2_out);
+module reg_file(clk, ld_reg, sr1, sr2, bus_in, dr, sr1_out, sr2_out);
     
-  input clk, rst, ld_reg;
+  input clk,ld_reg;
   input [4:0] sr1, sr2, dr;
   input [31:0] bus_in;
   output [31:0] sr1_out, sr2_out;    
@@ -21,13 +21,8 @@ module reg_file(clk, rst, ld_reg, sr1, sr2, bus_in, dr, sr1_out, sr2_out);
       end
   end
   
-  always @(posedge clk or posedge rst) begin
-    if(rst) begin
-        for(i=0; i < 32; i=i+1) begin
-            REG[i] = 32'd0;
-        end
-    end
-    else if(ld_reg && (dr != 5'b00000))begin
+  always @(posedge clk) begin
+    if(ld_reg && (dr != 5'b00000))begin
         REG[dr] <= bus_in;
     end
   end

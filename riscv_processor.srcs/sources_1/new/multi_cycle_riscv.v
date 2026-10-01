@@ -12,28 +12,32 @@ wire [2:0] funct3    = ir[14:12];
 
 
 //state machine
-reg [6:0] state, nstate;
+reg [3:0] state, nstate;
 wire [31:0] bus;
 
-parameter [5:0] 
-        fetch_1= 6'd0,
-        fetch_2= 6'd1,
-        fetch_3= 6'd2,
-        decode = 6'd3,
-        a_exec = 6'd4,
-        b_exec = 6'd5,
-        b_mem = 6'd6,
-        b_wb = 6'd7,
-        c_exec = 6'd8,
-        c_mem = 6'd9,
-        d_exec = 6'd10,
-        e_exec = 6'd11;
+parameter [3:0] 
+        fetch_1= 4'd0,
+        fetch_2= 4'd1,
+        fetch_3= 4'd2,
+        decode = 4'd3,
+        a_exec = 4'd4,
+        b_exec = 4'd5,
+        b_mem = 4'd6,
+        b_wb = 4'd7,
+        c_exec = 4'd8,
+        c_mem = 4'd9,
+        d_exec = 4'd10,
+        d_target = 4'd11, //this si if branch is taken state
+        e_exec = 4'd12,
+        f_exec = 4'd13;
     
+        
 //control signals
 //muxes
+reg sr1_or_oldPc;
 wire [31:0] mem_in;
 reg choose_sr2, bus_or_mdr;
-reg [1:0] addr_mux_crtl; // add sext/oldpc/0 for LUI
+reg addr_mux_crtl; // 0 = 32'd0, 1 = sext_out
 reg [1:0] pc_mux_ctrl;
 reg ir_or_bus; //for sign extend unit input
 reg sext_or_bus; //input to reg file either sext_out or bus 
@@ -55,21 +59,26 @@ wire [31:0] sext_in, reg_file_in;
 // Extract opcode from instruction register
 wire [6:0] opcode = ir[6:0];
 wire [1:0] mar_shf_amt = ir[13:12]; //2'b00 = byte, 2'b01 = halfword 2'b11 = word
+wire [31:0] into_alu_a;
+assign into_alu_a = sr1_or_oldPc ? old_pc : alu_in_a;
 
 // Track Routing Conditions
 wire is_track_a = (opcode == 7'b0110011) || (opcode == 7'b0010011); // R-type or I-type Arith
 wire is_track_b = (opcode == 7'b0000011);                           // Loads
 wire is_track_c = (opcode == 7'b0100011);                           // Stores
 wire is_track_d = (opcode == 7'b1100011);                           // Branches
-wire is_track_e = (opcode == 7'b0110111) ||                         // lui
-                  (opcode == 7'b0010111) ||                         // auipc
-                  (opcode == 7'b1101111) ||                         // jal
+wire is_track_e = (opcode == 7'b1101111) ||                         // jal
                   (opcode == 7'b1100111);                           // jalr
+wire is_track_f = (opcode == 7'b0110111) ||                         // lui
+                  (opcode == 7'b0010111);                           // auipc
 
-//initalize modules (reg file, memory, sign_ext, alu)
+//initalize modules (reg file, m6emory, sign_ext, alu)
 sign_ext sign_ext_multi(.ir(sext_in), .from_bus(ir_or_bus), .isSigned(ir[14]), .data_size(funct3[1:0]), .sext_out(sext_out));
-alu alu_multi(.in_a(alu_in_a), .in_b(alu_in_b), .ir(ir), .alu_op(alu_op), .alu_out(alu_out), .N(n), .Z(z), .C(c), .V(v));
-reg_file rf_multi(.clk(clk), .rst(rst), .ld_reg(ld_reg), .sr1(ir[19:15]), .sr2(ir[24:20]), .bus_in(reg_file_in), .dr(ir[11:7]), .sr1_out(alu_in_a), .sr2_out(sr2_out));
+alu alu_multi(.in_a(into_alu_a), .in_b(alu_in_b), .ir(ir), .alu_op(alu_op),
+              .br_cmp(state == d_exec),
+              .alu_out(alu_out), .N(n), .Z(z), .C(c), .V(v));
+              
+reg_file rf_multi(.clk(clk), .ld_reg(ld_reg), .sr1(ir[19:15]), .sr2(ir[24:20]), .bus_in(reg_file_in), .dr(ir[11:7]), .sr1_out(alu_in_a), .sr2_out(sr2_out));
 memory #(
         .ADDR_WIDTH(12) 
     ) mem_multi (
@@ -91,7 +100,7 @@ assign pc_in = (pc_mux_ctrl == 2'b00) ? bus :
                (pc_mux_ctrl == 2'b01) ? alu_inv : 
                (pc_mux_ctrl == 2'b10) ? addr_out : 
                (pc + 32'd4);
-assign addr_out = (addr_mux_crtl == 2'b00) ? 32'h00000000 : (addr_mux_crtl == 2'b01) ? sext_out : old_pc;
+assign addr_out = addr_mux_crtl ? sext_out : 32'd0;
 
 assign bus = GateALU  ? alu_out :
              GateMDR  ? mdr     : //come back later to sypport singed nums
@@ -107,6 +116,8 @@ always @(*) begin
     mem_size_sel = 2'b00; mem_signed = 1'b0; mem_cs= 1'b0; mem_we = 1'b0;
     choose_sr2 = (opcode == 7'b0010011) ? 1'b1 : 1'b0;
     ir_or_bus = 1'b0; sext_or_bus = 1'b0;
+    addr_mux_crtl = 1'b0; 
+    sr1_or_oldPc = 1'b0;
     
     case (state)
         fetch_1: begin
@@ -134,6 +145,7 @@ always @(*) begin
            else if (is_track_c)  nstate = c_exec;
            else if (is_track_d)  nstate = d_exec;
            else if (is_track_e)  nstate = e_exec;
+           else if( is_track_f) nstate = f_exec;
            else                  nstate = fetch_1; 
         end
         a_exec: begin
@@ -174,10 +186,41 @@ always @(*) begin
             mem_we = 1'b1;   
             nstate = fetch_1;
         end
-        d_exec: begin
-            
+        d_exec: begin //subtract sr1 - sr2
+            //control bits are set outside
+            nstate = fetch_1;
+            case (funct3)
+                3'b000: begin //beq
+                    if(z == 1'b1) nstate = d_target;
+                end
+                3'b001: begin //bne
+                    if(z == 1'b0) nstate = d_target;
+                end
+                3'b100: begin //blt
+                    if((n ^ v) == 1'b1) nstate = d_target;
+                end
+                3'b101: begin //bge
+                    if((n ^ v) == 1'b0) nstate = d_target;
+                end
+                3'b110: begin //bltu
+                    if(c == 1'b0) nstate = d_target;
+                end
+                3'b111: begin //bgeu
+                     if(c == 1'b1) nstate = d_target;
+                end
+            endcase
+        end
+        d_target: begin
+           sr1_or_oldPc = 1'b1;
+           choose_sr2 = 1'b1;
+           GateALU = 1'b1; 
+           ld_pc = 1'b1;
+           nstate = fetch_1;
         end
         e_exec: begin
+            
+        end
+        f_exec: begin
             
         end
         default: nstate = fetch_1;
@@ -208,7 +251,7 @@ end
 // 2'b10: Logic operations (AND, OR, XOR)
 // 2'b11: Pass A (or default)
 always @(*) begin
-if((state == b_exec) || (state == c_exec)) alu_op = 2'b00;
+if((state == b_exec) || (state == c_exec) || (state == d_exec) || (state == d_target)) alu_op = 2'b00;
 else if(state == c_mem) alu_op = 2'b11;
 else begin
     case (funct3)

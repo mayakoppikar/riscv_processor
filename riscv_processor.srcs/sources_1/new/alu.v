@@ -1,9 +1,10 @@
 `timescale 1ns / 1ps
 
-module alu(in_a, in_b, ir, alu_op, alu_out, N, Z, C, V);
+module alu(in_a, in_b, ir, alu_op, br_cmp, alu_out, N, Z, C, V);
 input [31:0] in_a, in_b;
 input [31:0] ir;
 input [1:0] alu_op;
+input br_cmp;            // 1 only in d_exec: subtract rs1 - rs2 for branch compare
 
 output reg [31:0] alu_out;
 output N, Z, C, V;
@@ -23,9 +24,11 @@ wire is_alu     = is_r_type | is_i_arith;
 // --- ADDER CONTROLS ---
 wire is_slt  = is_alu && (funct3 == 3'b010);   // SLT / SLTI
 wire is_sltu = is_alu && (funct3 == 3'b011);   // SLTU / SLTIU
-// Subtract for: R-type SUB, SLT/SLTU, and branches (compare via subtraction)
+// Subtract for: R-type SUB, SLT/SLTU, and the branch *compare* state only.
+// In d_target (br_cmp = 0) a branch must ADD old_pc + imm.
 wire is_sub  = (is_r_type && (funct3 == 3'b000) && funct7_5) ||
-               is_slt || is_sltu || is_branch;
+               is_slt || is_sltu ||
+               (is_branch && br_cmp);
 
 // --- SHIFT CONTROLS ---
 wire is_sll = is_alu && (funct3 == 3'b001);
@@ -48,10 +51,9 @@ wire [31:0] opb       = is_sub ? ~in_b : in_b;
 wire [32:0] adder_ext = {1'b0, in_a} + {1'b0, opb} + {32'd0, is_sub};
 wire [31:0] adder_out = adder_ext[31:0];
 
-
- assign N = adder_out[31];
- assign Z = (adder_out == 32'd0);
- assign C = adder_ext[32];   // for subtraction: C = 1 means no borrow (A >= B unsigned)
+assign N = adder_out[31];
+assign Z = (adder_out == 32'd0);
+assign C = adder_ext[32];   // for subtraction: C = 1 means no borrow (A >= B unsigned)
 assign V = (in_a[31] == opb[31]) && (adder_out[31] != in_a[31]);
 
 wire [31:0] slt_out  = {31'b0, N ^ V};   // signed less-than
