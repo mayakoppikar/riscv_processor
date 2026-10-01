@@ -25,12 +25,14 @@ parameter [5:0]
         b_mem = 6'd6,
         b_wb = 6'd7,
         c_exec = 6'd8,
-        d_exec = 6'd9,
-        e_exec = 6'd10;
+        c_mem = 6'd9,
+        d_exec = 6'd10,
+        e_exec = 6'd11;
     
 //control signals
 //muxes
-reg choose_sr2, mdr_sel;
+wire [31:0] mem_in;
+reg choose_sr2, bus_or_mdr;
 reg [1:0] addr_mux_crtl; // add sext/oldpc/0 for LUI
 reg [1:0] pc_mux_ctrl;
 reg ir_or_bus; //for sign extend unit input
@@ -76,11 +78,12 @@ memory #(
         .we(mem_we),          
         .size_sel(mem_size_sel),  
         .mar_addr(mar),  
-        .din(mdr),
+        .din(mem_in),
         .dout(mem_out)        
     );
 
 //combinational logic
+assign mem_in = bus_or_mdr ? bus : mdr;
 assign reg_file_in = sext_or_bus ? sext_out : bus;
 assign sext_in = ir_or_bus ? bus : ir;
 assign alu_in_b = choose_sr2 ? sext_out : sr2_out;
@@ -88,7 +91,6 @@ assign pc_in = (pc_mux_ctrl == 2'b00) ? bus :
                (pc_mux_ctrl == 2'b01) ? alu_inv : 
                (pc_mux_ctrl == 2'b10) ? addr_out : 
                (pc + 32'd4);
-assign mdr_in = mdr_sel ? bus : mem_out;
 assign addr_out = (addr_mux_crtl == 2'b00) ? 32'h00000000 : (addr_mux_crtl == 2'b01) ? sext_out : old_pc;
 
 assign bus = GateALU  ? alu_out :
@@ -101,7 +103,7 @@ always @(*) begin
     nstate = state;
     ld_mar = 1'b0; ld_mdr = 1'b0; ld_old_pc = 1'b0; ld_ir = 1'b0; ld_pc = 1'b0; ld_reg = 1'b0;
     GateALU = 1'b0; GateMDR = 1'b0; GatePc = 1'b0; GateAddr = 1'b0;
-    pc_mux_ctrl = 2'b00; mdr_sel = 1'b0;
+    pc_mux_ctrl = 2'b00; bus_or_mdr = 1'b0;
     mem_size_sel = 2'b00; mem_signed = 1'b0; mem_cs= 1'b0; mem_we = 1'b0;
     choose_sr2 = (opcode == 7'b0010011) ? 1'b1 : 1'b0;
     ir_or_bus = 1'b0; sext_or_bus = 1'b0;
@@ -159,7 +161,18 @@ always @(*) begin
            nstate = fetch_1;
         end
         c_exec: begin
-            
+            GateALU = 1'b1;
+            choose_sr2 = 1'b1;
+            ld_mar = 1'b1;
+            nstate = c_mem;
+        end
+        c_mem: begin
+            GateALU = 1'b1;
+            bus_or_mdr = 1'b1;
+            mem_cs = 1'b1;
+            mem_size_sel = funct3[1:0];
+            mem_we = 1'b1;   
+            nstate = fetch_1;
         end
         d_exec: begin
             
@@ -184,7 +197,7 @@ always @(posedge clk or posedge rst)begin
         if (ld_pc)  pc  <= pc_in;
         if (ld_ir)  ir  <= bus;
         if (ld_mar) mar <= bus;
-        if (ld_mdr) mdr <= mdr_in;
+        if (ld_mdr) mdr <= mem_out;
         if (ld_old_pc) old_pc <= bus;
     end
 end
@@ -195,7 +208,8 @@ end
 // 2'b10: Logic operations (AND, OR, XOR)
 // 2'b11: Pass A (or default)
 always @(*) begin
-if(state == b_exec) alu_op = 2'b00;
+if((state == b_exec) || (state == c_exec)) alu_op = 2'b00;
+else if(state == c_mem) alu_op = 2'b11;
 else begin
     case (funct3)
         3'b000, 

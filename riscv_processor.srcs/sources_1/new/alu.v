@@ -1,10 +1,10 @@
 `timescale 1ns / 1ps
 
 module alu(in_a, in_b, ir, alu_op, alu_out, N, Z, C, V);
-
 input [31:0] in_a, in_b;
 input [31:0] ir;
 input [1:0] alu_op;
+
 output reg [31:0] alu_out;
 output N, Z, C, V;
 
@@ -48,9 +48,10 @@ wire [31:0] opb       = is_sub ? ~in_b : in_b;
 wire [32:0] adder_ext = {1'b0, in_a} + {1'b0, opb} + {32'd0, is_sub};
 wire [31:0] adder_out = adder_ext[31:0];
 
-assign N = adder_out[31];
-assign Z = (adder_out == 32'd0);
-assign C = adder_ext[32];   // for subtraction: C = 1 means no borrow (A >= B unsigned)
+
+ assign N = adder_out[31];
+ assign Z = (adder_out == 32'd0);
+ assign C = adder_ext[32];   // for subtraction: C = 1 means no borrow (A >= B unsigned)
 assign V = (in_a[31] == opb[31]) && (adder_out[31] != in_a[31]);
 
 wire [31:0] slt_out  = {31'b0, N ^ V};   // signed less-than
@@ -80,7 +81,7 @@ always @(*) begin
         ADDERS:   alu_out = into_alu_adder;
         SHIFTERS: alu_out = into_alu_shifter;
         LOGICS:   alu_out = into_alu_logic;
-        PASSTHRU: alu_out = in_a;
+        PASSTHRU: alu_out = in_b;
         default:  alu_out = 32'd0;
     endcase
 end
