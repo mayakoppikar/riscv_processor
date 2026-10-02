@@ -19,17 +19,15 @@ parameter [3:0]
         fetch_1= 4'd0,
         fetch_2= 4'd1,
         fetch_3= 4'd2,
-        decode = 4'd3,
-        a_exec = 4'd4,
-        b_exec = 4'd5,
-        b_mem = 4'd6,
-        b_wb = 4'd7,
-        c_exec = 4'd8,
-        c_mem = 4'd9,
-        d_exec = 4'd10,
-        d_target = 4'd11, //this si if branch is taken state
-        e_exec = 4'd12,
-        f_exec = 4'd13;
+        a_exec = 4'd3,
+        b_and_c_exec = 4'd4,
+        b_mem = 4'd5,
+        b_wb = 4'd6,
+        c_mem = 4'd7,
+        d_exec = 4'd8,
+        d_target = 4'd9, //this si if branch is taken state
+        e_exec = 4'd10,
+        f_exec = 4'd11;
     
         
 //control signals
@@ -63,14 +61,14 @@ assign into_alu_a = sr1_or_oldPc ? old_pc : alu_in_a;
 assign alu_inv = alu_out &(~1'b1);
 
 // Track Routing Conditions
-wire is_track_a = (opcode == 7'b0110011) || (opcode == 7'b0010011); // R-type or I-type Arith
-wire is_track_b = (opcode == 7'b0000011);                           // Loads
-wire is_track_c = (opcode == 7'b0100011);                           // Stores
-wire is_track_d = (opcode == 7'b1100011);                           // Branches
-wire is_track_e = (opcode == 7'b1101111) ||                         // jal
-                  (opcode == 7'b1100111);                           // jalr
-wire is_track_f = (opcode == 7'b0110111) ||                         // lui
-                  (opcode == 7'b0010111);                           // auipc
+wire is_track_a = (bus[6:0] == 7'b0110011) || (bus[6:0] == 7'b0010011); // R-type or I-type Arith
+wire is_track_b = (bus[6:0] == 7'b0000011);                           // Loads
+wire is_track_c = (bus[6:0] == 7'b0100011);                           // Stores
+wire is_track_d = (bus[6:0] == 7'b1100011);                           // Branches
+wire is_track_e = (bus[6:0] == 7'b1101111) ||                         // jal
+                  (bus[6:0] == 7'b1100111);                           // jalr
+wire is_track_f = (bus[6:0] == 7'b0110111) ||                         // lui
+                  (bus[6:0] == 7'b0010111);                           // auipc
 
 //initalize modules (reg file, m6emory, sign_ext, alu)
 sign_ext sign_ext_multi(.ir(sext_in), .from_bus(ir_or_bus), .isSigned(ir[14]), .data_size(funct3[1:0]), .sext_out(sext_out));
@@ -134,12 +132,8 @@ always @(*) begin
         fetch_3: begin
             ld_ir = 1'b1; 
             GateMDR = 1'b1;
-            nstate = decode;
-        end
-        decode: begin
            if (is_track_a)       nstate = a_exec;
-           else if (is_track_b)  nstate = b_exec;
-           else if (is_track_c)  nstate = c_exec;
+           else if (is_track_b || is_track_c)  nstate = b_and_c_exec;
            else if (is_track_d)  nstate = d_exec;
            else if (is_track_e)  nstate = e_exec;
            else if( is_track_f)  nstate = f_exec;
@@ -150,11 +144,12 @@ always @(*) begin
             ld_reg = 1'b1;
             nstate = fetch_1;
         end
-        b_exec: begin
+        b_and_c_exec: begin
             GateALU = 1'b1;
             choose_sr2 = 1'b1;
             ld_mar = 1'b1;
-            nstate = b_mem;
+        if (ir[5]) nstate = c_mem;   
+        else       nstate = b_mem;       
         end
         b_mem: begin
             mem_cs = 1'b1;
@@ -168,12 +163,6 @@ always @(*) begin
            sext_or_bus = 1'b1;
            ld_reg = 1'b1;
            nstate = fetch_1;
-        end
-        c_exec: begin
-            GateALU = 1'b1;
-            choose_sr2 = 1'b1;
-            ld_mar = 1'b1;
-            nstate = c_mem;
         end
         c_mem: begin
             GateALU = 1'b1;
@@ -262,7 +251,7 @@ end
 // 2'b10: Logic operations (AND, OR, XOR)
 // 2'b11: Pass A (or default)
 always @(*) begin
-if((state == b_exec) || (state == c_exec) || (state == d_exec) || (state == d_target) || (state == e_exec)  || (state == f_exec)) alu_op = 2'b00;
+if((state == b_and_c_exec) || (state == d_exec) || (state == d_target) || (state == e_exec)  || (state == f_exec)) alu_op = 2'b00;
 else if(state == c_mem) alu_op = 2'b11;
 else begin
     case (funct3)
