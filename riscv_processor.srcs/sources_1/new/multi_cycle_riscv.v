@@ -6,7 +6,7 @@ input clk, rst;
 
 //registers
 reg [31:0] pc, ir, old_pc, mar, mdr;
-wire n, z, c, v; // Fixed: changed from reg to wire (driven by ALU output ports)
+wire n, z, c, v; 
 reg [1:0] alu_op;
 wire [2:0] funct3    = ir[14:12];
 
@@ -37,12 +37,11 @@ parameter [3:0]
 reg sr1_or_oldPc;
 wire [31:0] mem_in;
 reg choose_sr2, bus_or_mdr;
-reg addr_mux_crtl; // 0 = 32'd0, 1 = sext_out
 reg [1:0] pc_mux_ctrl;
 reg ir_or_bus; //for sign extend unit input
 reg sext_or_bus; //input to reg file either sext_out or bus 
 //bus gates
-reg GateALU, GateMDR, GatePc, GateAddr;
+reg GateALU, GateMDR, GatePc;
 //load controls
 reg ld_mar, ld_mdr, ld_old_pc, ld_ir, ld_pc, ld_reg;
 //memory
@@ -52,7 +51,7 @@ reg mem_signed, mem_cs, mem_we;
 //wires and intermediate signals
 wire [31:0] alu_in_a, alu_in_b, sr1_out, sr2_out, alu_out; // Fixed: added sr2_out
 wire [31:0] sext_out;
-wire [31:0] pc_in, alu_inv, addr_out;
+wire [31:0] pc_in, alu_inv;
 wire [31:0] mdr_in, mem_out;
 wire [31:0] sext_in, reg_file_in;
 
@@ -61,6 +60,7 @@ wire [6:0] opcode = ir[6:0];
 wire [1:0] mar_shf_amt = ir[13:12]; //2'b00 = byte, 2'b01 = halfword 2'b11 = word
 wire [31:0] into_alu_a;
 assign into_alu_a = sr1_or_oldPc ? old_pc : alu_in_a;
+assign alu_inv = alu_out &(~1'b1);
 
 // Track Routing Conditions
 wire is_track_a = (opcode == 7'b0110011) || (opcode == 7'b0010011); // R-type or I-type Arith
@@ -98,25 +98,22 @@ assign sext_in = ir_or_bus ? bus : ir;
 assign alu_in_b = choose_sr2 ? sext_out : sr2_out;
 assign pc_in = (pc_mux_ctrl == 2'b00) ? bus :
                (pc_mux_ctrl == 2'b01) ? alu_inv : 
-               (pc_mux_ctrl == 2'b10) ? addr_out : 
+               (pc_mux_ctrl == 2'b10) ? sext_out : 
                (pc + 32'd4);
-assign addr_out = addr_mux_crtl ? sext_out : 32'd0;
 
 assign bus = GateALU  ? alu_out :
              GateMDR  ? mdr     : //come back later to sypport singed nums
              GatePc   ? pc      :
-             GateAddr ? addr_out     : 
                         32'h00000000; 
 
 always @(*) begin
     nstate = state;
     ld_mar = 1'b0; ld_mdr = 1'b0; ld_old_pc = 1'b0; ld_ir = 1'b0; ld_pc = 1'b0; ld_reg = 1'b0;
-    GateALU = 1'b0; GateMDR = 1'b0; GatePc = 1'b0; GateAddr = 1'b0;
+    GateALU = 1'b0; GateMDR = 1'b0; GatePc = 1'b0; 
     pc_mux_ctrl = 2'b00; bus_or_mdr = 1'b0;
     mem_size_sel = 2'b00; mem_signed = 1'b0; mem_cs= 1'b0; mem_we = 1'b0;
     choose_sr2 = (opcode == 7'b0010011) ? 1'b1 : 1'b0;
     ir_or_bus = 1'b0; sext_or_bus = 1'b0;
-    addr_mux_crtl = 1'b0; 
     sr1_or_oldPc = 1'b0;
     
     case (state)
@@ -145,7 +142,7 @@ always @(*) begin
            else if (is_track_c)  nstate = c_exec;
            else if (is_track_d)  nstate = d_exec;
            else if (is_track_e)  nstate = e_exec;
-           else if( is_track_f) nstate = f_exec;
+           else if( is_track_f)  nstate = f_exec;
            else                  nstate = fetch_1; 
         end
         a_exec: begin
@@ -218,10 +215,24 @@ always @(*) begin
            nstate = fetch_1;
         end
         e_exec: begin
-            
+            choose_sr2 = 1'b1;
+            sr1_or_oldPc = (opcode == 7'b1101111); 
+            pc_mux_ctrl  = 2'b01;  
+            ld_pc        = 1'b1;
+            GatePc       = 1'b1;  
+            ld_reg       = 1'b1;   
+            nstate = fetch_1;
         end
         f_exec: begin
-            
+            ld_reg = 1'b1;
+             if (opcode == 7'b0110111) begin   // lui
+             sext_or_bus = 1'b1;
+             end else begin                     // auipc
+             sr1_or_oldPc = 1'b1;
+             choose_sr2   = 1'b1;
+             GateALU      = 1'b1;
+             end
+             nstate = fetch_1;
         end
         default: nstate = fetch_1;
     endcase
@@ -251,7 +262,7 @@ end
 // 2'b10: Logic operations (AND, OR, XOR)
 // 2'b11: Pass A (or default)
 always @(*) begin
-if((state == b_exec) || (state == c_exec) || (state == d_exec) || (state == d_target)) alu_op = 2'b00;
+if((state == b_exec) || (state == c_exec) || (state == d_exec) || (state == d_target) || (state == e_exec)  || (state == f_exec)) alu_op = 2'b00;
 else if(state == c_mem) alu_op = 2'b11;
 else begin
     case (funct3)

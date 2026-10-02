@@ -40,7 +40,7 @@ module tb_multi_cycle_riscv();
 
         // Run simulation long enough for instructions to execute 
         // (3 instructions * ~5 cycles each = ~150ns)
-        #975
+        #100000
         
 $display("--- Final Register File Dump ---");
         for (i = 0; i < 32; i = i + 1) begin
