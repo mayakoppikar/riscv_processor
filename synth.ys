@@ -1,0 +1,22 @@
+# synth.ys
+# Read all your processor Verilog files
+read_verilog alu.v reg_file.v memory.v sign_ext.v multi_cycle_riscv.v
+
+# Set your top module name
+hierarchy -top multi_cycle_riscv
+
+# Run generic synthesis
+synth -top multi_cycle_riscv
+
+# Map flip-flops and logic to standard cells (using generic ABC or a target liberty if available)
+# If you don't have a specific .lib file yet, 'abc' will use internal generic cells for area estimation
+abc -g AND,OR,XOR,MUX,DFF
+
+# Clean up the netlist
+clean
+
+# Write out the synthesized gate-level netlist
+write_verilog synth_netlist.v
+
+# Print summary area report
+stat

@@ -1,8 +1,11 @@
 `timescale 1ns / 1ps
 
-module multi_cycle_riscv(clk, rst);
+module multi_cycle_riscv(clk, rst, dbg_pc);
 //inputs and outputs
 input clk, rst;
+
+output [31:0] dbg_pc;
+assign dbg_pc = pc;   
 
 //registers
 reg [31:0] pc, ir, old_pc, mar, mdr;
@@ -32,7 +35,7 @@ parameter [3:0]
         
 //control signals
 //muxes
-reg sr1_or_oldPc;
+reg choose_sr1;
 wire [31:0] mem_in;
 reg choose_sr2, bus_or_mdr;
 reg [1:0] pc_mux_ctrl;
@@ -47,7 +50,7 @@ reg [1:0] mem_size_sel; // Fixed: changed to 2-bit width to match memory port
 reg mem_signed, mem_cs, mem_we;
 
 //wires and intermediate signals
-wire [31:0] alu_in_a, alu_in_b, sr1_out, sr2_out, alu_out; // Fixed: added sr2_out
+wire [31:0] alu_in_a, alu_in_b, sr2_out, alu_out; // Fixed: added sr2_out
 wire [31:0] sext_out;
 wire [31:0] pc_in, alu_inv;
 wire [31:0] mdr_in, mem_out;
@@ -55,9 +58,8 @@ wire [31:0] sext_in, reg_file_in;
 
 // Extract opcode from instruction register
 wire [6:0] opcode = ir[6:0];
-wire [1:0] mar_shf_amt = ir[13:12]; //2'b00 = byte, 2'b01 = halfword 2'b11 = word
 wire [31:0] into_alu_a;
-assign into_alu_a = sr1_or_oldPc ? old_pc : alu_in_a;
+assign into_alu_a = choose_sr1 ? old_pc : alu_in_a;
 assign alu_inv = alu_out &(~1'b1);
 
 // Track Routing Conditions
@@ -96,8 +98,8 @@ assign sext_in = ir_or_bus ? bus : ir;
 assign alu_in_b = choose_sr2 ? sext_out : sr2_out;
 assign pc_in = (pc_mux_ctrl == 2'b00) ? bus :
                (pc_mux_ctrl == 2'b01) ? alu_inv : 
-               (pc_mux_ctrl == 2'b10) ? sext_out : 
                (pc + 32'd4);
+           
 
 assign bus = GateALU  ? alu_out :
              GateMDR  ? mdr     : //come back later to sypport singed nums
@@ -112,7 +114,7 @@ always @(*) begin
     mem_size_sel = 2'b00; mem_signed = 1'b0; mem_cs= 1'b0; mem_we = 1'b0;
     choose_sr2 = (opcode == 7'b0010011) ? 1'b1 : 1'b0;
     ir_or_bus = 1'b0; sext_or_bus = 1'b0;
-    sr1_or_oldPc = 1'b0;
+    choose_sr1 = 1'b0;
     
     case (state)
         fetch_1: begin
@@ -197,7 +199,7 @@ always @(*) begin
             endcase
         end
         d_target: begin
-           sr1_or_oldPc = 1'b1;
+           choose_sr1 = 1'b1;
            choose_sr2 = 1'b1;
            GateALU = 1'b1; 
            ld_pc = 1'b1;
@@ -205,7 +207,7 @@ always @(*) begin
         end
         e_exec: begin
             choose_sr2 = 1'b1;
-            sr1_or_oldPc = (opcode == 7'b1101111); 
+            choose_sr1 = (opcode == 7'b1101111); 
             pc_mux_ctrl  = 2'b01;  
             ld_pc        = 1'b1;
             GatePc       = 1'b1;  
@@ -217,7 +219,7 @@ always @(*) begin
              if (opcode == 7'b0110111) begin   // lui
              sext_or_bus = 1'b1;
              end else begin                     // auipc
-             sr1_or_oldPc = 1'b1;
+             choose_sr1 = 1'b1;
              choose_sr2   = 1'b1;
              GateALU      = 1'b1;
              end
