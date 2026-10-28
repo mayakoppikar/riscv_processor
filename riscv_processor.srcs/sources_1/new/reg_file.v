@@ -1,30 +1,21 @@
-`timescale 1ns / 1ps
-
-module reg_file(clk, ld_reg, sr1, sr2, bus_in, dr, sr1_out, sr2_out);
-    
-  input clk,ld_reg;
+module reg_file(clk, rst, ld_reg, sr1, sr2, bus_in, dr, sr1_out, sr2_out);
+  input clk, rst, ld_reg;
   input [4:0] sr1, sr2, dr;
   input [31:0] bus_in;
-  output [31:0] sr1_out, sr2_out;    
-  
-  reg [31:0] REG [31:1]; //32x32
-  
-  assign sr1_out = (sr1 == 5'b00000) ? 32'd0 : REG[sr1];
-  assign sr2_out = (sr2 == 5'b00000) ? 32'd0 : REG[sr2];
-  
-  integer i;
+  output [31:0] sr1_out, sr2_out;
 
-  // Initial block to set all registers to 0 at time 0
-  initial begin
-      for(i = 0; i < 32; i = i + 1) begin
-          REG[i] = 32'd0;
-      end
-  end
-  
+  reg [31:0] REG [31:1];   //no x0 anymore
+
+  assign sr1_out = (sr1 == 5'd0) ? 32'd0 : REG[sr1];
+  assign sr2_out = (sr2 == 5'd0) ? 32'd0 : REG[sr2];
+
+  integer i;
   always @(posedge clk) begin
-    if(ld_reg && (dr != 5'b00000))begin
-        REG[dr] <= bus_in;
+    if (rst) begin //synch reset
+      for (i = 1; i < 32; i = i + 1)
+        REG[i] <= 32'd0;
+    end else if (ld_reg && (dr != 5'd0)) begin
+      REG[dr] <= bus_in;
     end
   end
-    
 endmodule
