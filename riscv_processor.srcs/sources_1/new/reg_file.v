@@ -7,7 +7,7 @@ module reg_file(clk, ld_reg, sr1, sr2, bus_in, dr, sr1_out, sr2_out);
   input [31:0] bus_in;
   output [31:0] sr1_out, sr2_out;    
   
-  reg [31:0] REG [31:0]; //32x32
+  reg [31:0] REG [31:1]; //32x32
   
   assign sr1_out = (sr1 == 5'b00000) ? 32'd0 : REG[sr1];
   assign sr2_out = (sr2 == 5'b00000) ? 32'd0 : REG[sr2];
